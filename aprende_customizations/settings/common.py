@@ -21,4 +21,4 @@ def plugin_settings(settings):
 
     # Corrige la llamada a LinkedInAddToProfileConfiguration.add_to_profile_url,
     # que upstream invoca con el objeto `course` en lugar de su display_name.
-    settings.APRENDE_FIX_LINKEDIN_URL = True
+    settings.APRENDE_FIX_LINKEDIN_URL = False

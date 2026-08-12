@@ -171,10 +171,10 @@ def _update_social_context(request, context, course, user_certificate, platform_
     from openedx.core.djangoapps.site_configuration import (  # pylint: disable=import-outside-toplevel
         helpers as configuration_helpers,
     )
-    from openedx.core.djangoapps.user_api.models import (  # noqa pylint: disable=import-outside-toplevel,unused-import
-        UserPreference,
-    )
-    from lms.djangoapps.certificates.models import (  # pylint: disable=import-outside-toplevel
+    # OJO: el modelo vive en common.djangoapps.student.models, NO en
+    # lms.djangoapps.certificates.models. Verificado contra el import de
+    # webview.py:26 en release/ulmo.3.
+    from common.djangoapps.student.models import (  # pylint: disable=import-outside-toplevel
         LinkedInAddToProfileConfiguration,
     )
 

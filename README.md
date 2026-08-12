@@ -18,8 +18,8 @@ pendiente".
 | `courseware/courses.py` — orden del catálogo | 7 | `patches.py` — sustitución de función |
 | `courseware/utils.py` — `is_empty_html` | 10 | `patches.py` — sustitución de función |
 | `certificates/views/webview.py` — calificación | ~20 | `filters.py` — hook `CertificateRenderStarted` |
+| `certificates/views/webview.py` — `fullTheme` | ~4 | `filters.py` — **conservado**, ver abajo |
 | `certificates/views/webview.py` — `linked_in_url` | 1 | `patches.py` — sustitución de función |
-| `certificates/views/webview.py` — `fullTheme` | ~4 | **descartado** — ver abajo |
 | `certificates/views/webview.py` — descripción de la organización | ~2 | **descartado** — sin consumidor |
 
 ---
@@ -47,38 +47,66 @@ El fork cambiaba dos `reverse=False` por `reverse=True`. Aquí el sentido se lee
 de `APRENDE_CATALOG_NEWEST_FIRST`, lo que permite revertirlo sin reconstruir la
 imagen y deja el código en forma de propuesta para upstream (Fase 3 del plan).
 
-### `fullTheme` queda fuera, y es un hallazgo aparte
+### `fullTheme` se conserva — corrección de la auditoría
 
-En el fork, `_update_context_with_user_score` invertía `fullTheme` partiendo de
-`context.get('fullTheme', False)`. Como la clave nunca existe en el contexto, el
-valor era siempre `True` y la rama `% if not fullTheme:` de
-`certificates/_accomplishment-rendering.html` **no se renderizaba nunca**.
+La auditoría lo listó como código muerto, y una primera versión de este paquete lo
+descartó. **Era un error.**
 
-Consecuencia: todos los certificados sirven el logo desde una URL externa
+La clave llega desde `cert_html_view_overrides` en las Advanced Settings del curso.
+Ejemplo real de producción:
 
+```json
+{
+    "customOrganizacionText": "impartido por la Secretaría Anticorrupción y Buen Gobierno...",
+    "displayScore": true,
+    "fullTheme": true,
+    "organizationLogoExtra": "https://mexicox.gob.mx/media/organization_logos/fucion_publica.jpg"
+}
 ```
-https://aprende.gob.mx/images/Logo_Educ_RG.png
+
+La inversión (`context['fullTheme'] = not context.get('fullTheme', False)`) selecciona qué
+rama de `certificates/_accomplishment-rendering.html` se renderiza:
+
+| En `cert_html_view_overrides` | Tras la inversión | Rama | Logo |
+|---|---|---|---|
+| `"fullTheme": true` | `False` | `% if not fullTheme:` | local `ENDOSO_5.png` |
+| clave ausente | `True` | `% else:` | remoto `aprende.gob.mx` |
+
+Es un interruptor de juego de logos por curso. Descartarlo cambiaría el logo de todos los
+certificados que declaran `"fullTheme": true`.
+
+La doble negación es confusa y convendría invertir el nombre de la clave o la condición de la
+plantilla, pero eso cambiaría el significado de la clave en los cursos que ya la declaran.
+El paquete conserva el comportamiento exacto; simplificarlo es trabajo aparte.
+
+### `LinkedInAddToProfileConfiguration` vive en `student.models`
+
+No en `lms.djangoapps.certificates.models`, que es donde parecería por el contexto. La ruta
+correcta —la que usa `webview.py:26`— es:
+
+```python
+from common.djangoapps.student.models import LinkedInAddToProfileConfiguration
 ```
 
-en lugar del estático local `${static.url("images/ENDOSO_5.png")}`. Un
-certificado es un documento que se abre meses después de emitirse; si ese
-recurso se mueve o el sitio no responde, el logo sale roto.
+Detectado al probar en `cursos-dev`: el import equivocado estaba **dentro** de
+`_update_social_context`, así que no fallaba al aplicar el parche sino **al renderizar un
+certificado**. Un despliegue con ese error habría tumbado todos los certificados.
 
-**Decidir cuál es el logo correcto** y, si es el local, corregir la condición de
-la plantilla. Es contenido, no arquitectura: se resuelve fuera de este paquete.
+Es el argumento a favor de probar el renderizado real y no solo que los parches se apliquen.
 
 ### Se descartan dos variables sin consumidor
 
 `score_available` y `accomplishment_copy_course_org_2` no aparecen en ninguna
 plantilla del tema Indigo ni de upstream. Se calculaban y nadie las leía.
 
-### Los tres defectos de la auditoría, corregidos
+### Defectos de la auditoría
 
-1. **`except Exception as e` sin registro** — ahora `log.exception`, y el filtro
+1. **`except Exception as e` sin registro** — corregido: `log.exception`, y el filtro
    se configura con `fail_silently: False`.
-2. **`user` sombreado en el bucle de `CourseGradeFactory`** — se usa `read()` en
-   lugar de `iter()`, que no necesita bucle para un solo usuario.
-3. **`fullTheme` como código muerto** — ver arriba.
+2. **`user` sombreado en el bucle de `CourseGradeFactory`** — corregido: se usa `read()`
+   en lugar de `iter()`, que no necesita bucle para un solo usuario.
+3. **`fullTheme` como código muerto** — **el diagnóstico era incorrecto.** Es un
+   interruptor funcional. Ver arriba.
 
 ---
 
@@ -142,26 +170,45 @@ imprimiría su calificación en el documento de otro.
 
 ## Trabajo pendiente
 
-1. **Verificar el orden de llamada.** `filters.py` asume que
-   `_update_context_with_user_info` corre antes de `run_filter` (línea 597).
-   Confirmar que `accomplishment_user_id` ya está en el contexto en ese punto:
+1. **Verificar si LinkedIn está habilitado.** El botón "Add to LinkedIn" no aparece
+   en ningún certificado de `cursos-dev` ni de producción:
 
-   ```bash
-   docker exec $LMS grep -n "_update_context_with_user_info\|run_filter" \
-     /openedx/edx-platform/lms/djangoapps/certificates/views/webview.py
+   ```python
+   from common.djangoapps.student.models import LinkedInAddToProfileConfiguration
+   print(LinkedInAddToProfileConfiguration.current().is_enabled())
    ```
 
-2. **Probar el import desde `AppConfig.ready()`, no solo desde el shell.** El
-   shell corre con las apps ya cargadas; `ready()` corre durante el arranque.
-   El resultado OK del shell es necesario pero no suficiente. Si falla, mover
-   los parches a una señal posterior.
+   Si devuelve `False`, la corrección de `linked_in_url` afecta a una rama que nunca
+   se ejecuta — lo que explica que el defecto pasara desapercibido. El parche es
+   inocuo y se conserva, pero conviene saberlo antes de proponer el PR upstream
+   (Fase 3).
+
+2. **Probar el renderizado real de un certificado** tras cada cambio en
+   `patches.py` o `filters.py`. Que los parches se apliquen al arrancar no prueba
+   que el certificado renderice: los import locales solo se evalúan al ejecutarse
+   la función. Así se detectó el error de ruta de
+   `LinkedInAddToProfileConfiguration`.
 
 3. **Verificar que ningún otro plugin define `OPEN_EDX_FILTERS_CONFIG`**, que
    esta configuración sobrescribiría.
 
-4. **Pruebas funcionales.** Al menos: orden del catálogo, `is_empty_html` con
-   descripción que solo tenga un iframe, renderizado de un certificado con y sin
-   `displayScore`, y el botón de LinkedIn en un certificado.
+4. **Pruebas funcionales completas.** Orden del catálogo, `is_empty_html` con
+   descripción que solo tenga un iframe, certificado con y sin `displayScore`, y
+   certificado con y sin `fullTheme` — comprobando que el logo cambia.
+
+## Fuera del alcance del paquete
+
+**Recursos externos en el certificado.** El certificado carga imágenes desde
+`aprende.gob.mx` y `mexicox.gob.mx` (esta última vía `organizationLogoExtra`).
+En `cursos-dev` algunas aparecen rotas. Un certificado se abre meses después de
+emitirse; si esos recursos se mueven, el documento sale incompleto.
+
+Además, `/static/images/Logo_OCEI.png` se sirve **sin hash de manifiesto**, a
+diferencia del resto de estáticos del tema — probablemente no pasó por
+`collectstatic` correctamente.
+
+Es contenido e infraestructura de assets, no arquitectura de este paquete, pero
+conviene revisarlo.
 
 ---
 
@@ -182,26 +229,3 @@ grep -rn "is_empty_html" --include="*.py" | grep -v "def is_empty_html"
 ```
 
 Lista verificada contra `release/ulmo.3` el 12 de agosto de 2026.
-
----
-
-## Plugin de Tutor
-
-`tutor-plugin/aprende_customizations.py` registra el filtro del certificado en
-`OPEN_EDX_FILTERS_CONFIG`. **No se instala con pip**: hay que copiarlo a la raíz de plugins de
-Tutor del servidor.
-
-```bash
-sudo cp tutor-plugin/aprende_customizations.py /opt/tutor/plugins/
-tutor plugins enable aprende_customizations
-tutor config save
-```
-
-Se versiona aquí, junto al código que configura, para que no se separen. Sin este plugin el
-paquete se instala pero el filtro del certificado nunca se registra — y no da ningún error.
-
-Antes de habilitarlo, verificar que ningún otro plugin defina la misma variable:
-
-```bash
-grep -rn "OPEN_EDX_FILTERS_CONFIG" /opt/tutor/env/apps/openedx/settings/
-```

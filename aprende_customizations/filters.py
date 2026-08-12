@@ -10,12 +10,12 @@ la versión original.
 
 Diferencias deliberadas respecto al código del fork:
 
-1. **No se toca `fullTheme`.** En el fork esa bandera se invertía en cada
-   llamada partiendo de un valor que nunca existe en el contexto, así que
-   siempre acababa en True y la rama `% if not fullTheme:` de
-   `_accomplishment-rendering.html` no se renderizaba nunca. Es una decisión
-   de contenido —qué logo debe llevar el certificado— y no de arquitectura;
-   se resuelve aparte. Ver README.
+1. **`fullTheme` se conserva.** La auditoría lo clasificó como código muerto y en
+   una primera versión de este paquete se descartó; era un error. La clave llega
+   desde `cert_html_view_overrides` de las Advanced Settings del curso, y la
+   inversión selecciona el juego de logos que renderiza
+   `certificates/_accomplishment-rendering.html`. Descartarla cambiaría el logo
+   de todos los certificados que declaran `"fullTheme": true`.
 
 2. **No se calcula `score_available` ni
    `accomplishment_copy_course_org_2`.** Ninguna plantilla del tema ni de
@@ -50,6 +50,26 @@ class AddUserScore(PipelineStep):
     """
 
     def run_filter(self, context, custom_template):  # pylint: disable=arguments-differ
+        # ---------------------------------------------------------------
+        # fullTheme — se invierte SIEMPRE, independientemente de displayScore,
+        # igual que en el código original del fork.
+        # ---------------------------------------------------------------
+        # La clave llega desde `cert_html_view_overrides` (Advanced Settings
+        # del curso) y la plantilla del tema la consume así:
+        #
+        #   % if not fullTheme:   -> logo local  ${static.url("images/ENDOSO_5.png")}
+        #   % else:               -> logo remoto https://aprende.gob.mx/...
+        #
+        # Con la inversión, un curso que declara `"fullTheme": true` acaba
+        # renderizando la rama del logo LOCAL. Es un interruptor de juego de
+        # logos por curso, no código muerto.
+        #
+        # La doble negación es confusa y sería mejor invertir el nombre o la
+        # condición de la plantilla, pero eso cambiaría el significado de la
+        # clave en todos los cursos que ya la declaran. Se conserva el
+        # comportamiento exacto; simplificarlo es trabajo aparte.
+        context["fullTheme"] = not context.get("fullTheme", False)
+
         if not context.get("displayScore", False):
             return {"context": context, "custom_template": custom_template}
 

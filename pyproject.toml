@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aprende-openedx-customizations"
+version = "0.1.0"
+description = "Personalizaciones de Open edX para cursos.aprende.gob.mx (Dirección General @prende.mx)"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "AGPL-3.0-or-later"
+authors = [{ name = "Dirección General @prende.mx" }]
+classifiers = [
+    "Programming Language :: Python :: 3.11",
+    "Framework :: Django",
+]
+
+[project.urls]
+Homepage = "https://github.com/aprendemx/aprende-openedx-customizations"
+
+# Punto de entrada del sistema de plugins de Open edX.
+# El LMS descubre la app por aquí; no hace falta tocar INSTALLED_APPS.
+[project.entry-points."lms.djangoapp"]
+aprende_customizations = "aprende_customizations.apps:AprendeCustomizationsConfig"
+
+[tool.setuptools.packages.find]
+include = ["aprende_customizations*"]
